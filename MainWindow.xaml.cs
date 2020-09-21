@@ -34,15 +34,16 @@ namespace WindowsAudioVolumeManager {
 					count++;
 				}
 
-				if(count > 0) {
-					RefreshSessions();
+				if (count > 0) {
+					RefreshUIData();
 				}
 			});
 		}
 
 		/// Has to run in an MTA thread
-		private void RefreshSessions() {
+		private void RefreshUIData() {
 			MMDevice device = Devices[(int)Invoke(() => AudioOutputCombo.SelectedIndex)];
+			using AudioEndpointVolume masterVolume = AudioEndpointVolume.FromDevice(device);
 
 			using AudioSessionManager2 sessionManager = AudioSessionManager2.FromMMDevice(device);
 			using AudioSessionEnumerator sessionEnumerator = sessionManager.GetSessionEnumerator();
@@ -54,13 +55,18 @@ namespace WindowsAudioVolumeManager {
 				using SimpleAudioVolume volume = session.QueryInterface<SimpleAudioVolume>();
 
 				string name = (displayName == null || displayName.Length == 0) ? session2.Process.MainModule.ModuleName : displayName;
-				int vol = (int)(volume.MasterVolume * 100d);
-
-				Invoke(() => SessionControls.Add(new AudioSessionElement(name, vol)));
+				Invoke(() => SessionControls.Add(new AudioSessionElement(name, volume.MasterVolume, this)));
 			}
+
+			Invoke(() => {
+				int masterVol = (int)(masterVolume.MasterVolumeLevelScalar * 100f);
+
+				MasterSlider.Value = masterVol;
+				DefaultSessionSlider.Value = masterVol;
+			});
 		}
 
-		private object Invoke(Action action) {
+		private object Invoke(Action action) { // Helper functions
 			return Invoke(() => {
 				action();
 				return null;
@@ -72,7 +78,7 @@ namespace WindowsAudioVolumeManager {
 
 
 		private void RefreshAppsButton_Click(object sender, RoutedEventArgs e) {
-			Task.Run(RefreshSessions);
+			Task.Run(RefreshUIData);
 		}
 	}
 }
