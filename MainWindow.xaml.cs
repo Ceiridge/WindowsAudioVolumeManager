@@ -2,6 +2,8 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
@@ -40,12 +42,14 @@ namespace WindowsAudioVolumeManager {
 				if (count > 0) {
 					RefreshUIData();
 				}
+
+				Task.Run(VolumeManagerThread);
 			});
 		}
 
 		/// Has to run in an MTA thread
 		private void RefreshUIData() {
-			MMDevice device = Devices[(int)Invoke(() => AudioOutputCombo.SelectedIndex)];
+			MMDevice device = GetSelectedDevice();
 			using AudioEndpointVolume masterVolume = AudioEndpointVolume.FromDevice(device);
 
 			using AudioSessionManager2 sessionManager = AudioSessionManager2.FromMMDevice(device);
@@ -53,12 +57,8 @@ namespace WindowsAudioVolumeManager {
 
 			Invoke(SessionControls.Clear);
 			foreach (AudioSessionControl session in sessionEnumerator) {
-				string displayName = session.DisplayName;
-				using AudioSessionControl2 session2 = session.QueryInterface<AudioSessionControl2>();
 				using SimpleAudioVolume volume = session.QueryInterface<SimpleAudioVolume>();
-
-				string name = (displayName == null || displayName.Length == 0) ? session2.Process.MainModule.ModuleName : displayName;
-				Invoke(() => SessionControls.Add(new AudioSessionElement(name, volume.MasterVolume, this)));
+				Invoke(() => SessionControls.Add(new AudioSessionElement(GetSessionName(session), volume.MasterVolume, this)));
 			}
 
 			Invoke(() => {
@@ -69,14 +69,56 @@ namespace WindowsAudioVolumeManager {
 			});
 		}
 
-		private object Invoke(Action action) { // Helper functions
-			return Invoke(() => {
+		private void VolumeManagerThread() {
+			while (true) {
+				Thread.Sleep(1000);
+
+				try {
+					MMDevice device = GetSelectedDevice();
+					using AudioSessionManager2 sessionManager = AudioSessionManager2.FromMMDevice(device);
+					using AudioSessionEnumerator sessionEnumerator = sessionManager.GetSessionEnumerator();
+
+					foreach (AudioSessionControl session in sessionEnumerator) {
+						using SimpleAudioVolume volume = session.QueryInterface<SimpleAudioVolume>();
+						string name = GetSessionName(session);
+						AudioSessionElement element = Invoke(() => SessionControls.FirstOrDefault((element) => element.Name.Equals(name)));
+
+						if (element == null) {
+							volume.MasterVolume = DefaultSessionElement.ScalarVolume;
+							Invoke(() => SessionControls.Add(new AudioSessionElement(name, volume.MasterVolume, this)));
+						} else {
+							float masterVol = volume.MasterVolume;
+
+							if (element.ScalarVolume != masterVol) {
+								element.ScalarVolume = masterVol;
+								element.NotifyVolumeUpdate();
+							}
+						}
+					}
+				} catch (Exception e) {
+					Console.WriteLine(e);
+				}
+			}
+		}
+
+
+		private void Invoke(Action action) { // Helper functions
+			Invoke<object>(() => {
 				action();
 				return null;
 			});
 		}
-		private object Invoke(Func<object> action) {
-			return Dispatcher.Invoke(DispatcherPriority.Normal, action);
+		private T Invoke<T>(Func<T> action) {
+			return (T)Dispatcher.Invoke(DispatcherPriority.Normal, action);
+		}
+		private MMDevice GetSelectedDevice() {
+			return Devices[Invoke(() => AudioOutputCombo.SelectedIndex)];
+		}
+		private string GetSessionName(AudioSessionControl sessionControl) {
+			string displayName = sessionControl.DisplayName;
+			using AudioSessionControl2 session2 = sessionControl.QueryInterface<AudioSessionControl2>();
+
+			return (displayName == null || displayName.Length == 0) ? session2.Process.MainModule.ModuleName : displayName;
 		}
 
 
@@ -85,7 +127,11 @@ namespace WindowsAudioVolumeManager {
 		}
 
 		private void MasterSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e) {
-			foreach(AudioSessionElement element in SessionControls) {
+			MMDevice device = GetSelectedDevice();
+			using AudioEndpointVolume masterVolume = AudioEndpointVolume.FromDevice(device);
+			masterVolume.MasterVolumeLevelScalar = (float)(MasterSlider.Value / 100f);
+
+			foreach (AudioSessionElement element in SessionControls) {
 				element.NotifyVolumeUpdate();
 			}
 		}

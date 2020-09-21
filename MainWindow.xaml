@@ -15,11 +15,13 @@
 						<Grid.ColumnDefinitions>
 							<ColumnDefinition Width="Auto" SharedSizeGroup="Key" />
 							<ColumnDefinition Width="Auto" />
+							<ColumnDefinition Width="Auto" />
 							<ColumnDefinition Width="*" />
 						</Grid.ColumnDefinitions>
 						<TextBlock Text="{Binding Name}" FontWeight="Bold" />
 						<Slider Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding Volume, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="150" HorizontalAlignment="Right" AutoToolTipPlacement="TopLeft" SmallChange="1" />
 						<TextBlock Grid.Column="2" Text="{Binding VolumeText, Mode=OneWay}" />
+						<CheckBox Grid.Column="3" Content="Saved" Margin="5,0,0,0" />
 					</Grid>
 				</DataTemplate>
 			</ListView.ItemTemplate>
