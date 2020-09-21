@@ -2,7 +2,7 @@
 using System;
 
 namespace WindowsAudioVolumeManager {
-	class AudioSessionElement : ObservablePropertyObject {
+	public class AudioSessionElement : ObservablePropertyObject {
 		public float ScalarVolume;
 		private readonly MainWindow MainWindow;
 		private readonly AudioSessionControl SessionControl;

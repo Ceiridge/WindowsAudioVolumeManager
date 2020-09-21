@@ -12,13 +12,23 @@ namespace WindowsAudioVolumeManager {
 	public partial class MainWindow : Window {
 		private readonly List<MMDevice> Devices = new List<MMDevice>();
 		private readonly ObservableCollection<AudioSessionElement> SessionControls = new ObservableCollection<AudioSessionElement>();
-		private readonly AudioSessionElement DefaultSessionElement;
+		private readonly ConfigParser Parser;
+
+		public List<SavedAudioSession> SavedSessions = new List<SavedAudioSession>();
+		public readonly AudioSessionElement DefaultSessionElement;
 
 		public MainWindow() {
 			InitializeComponent();
 			SessionListView.DataContext = SessionControls;
 			DefaultSessionElement = new AudioSessionElement("_Default_App", 1f, this);
 			DefaultSessionSlider.DataContext = DefaultSessionElement;
+
+			try {
+				Parser = new ConfigParser(this);
+				Parser.LoadConfig();
+			} catch (Exception e) {
+				Console.WriteLine(e);
+			}
 
 			Task.Run(() => { // Windows CoreAudio API has to be called in an MTA thread (typical Microsoft logic)
 				using MMDeviceEnumerator deviceEnumerator = new MMDeviceEnumerator();
