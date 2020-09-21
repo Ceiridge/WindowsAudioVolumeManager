@@ -1,5 +1,6 @@
 # Windows Audio Volume Manager
 A better volume mixer for Windows
+Note: I accidentally created the git repository in the source folder of the main program, which means that there isn't a .sln file available, although it should be easy to recreate (.NET Core).
 
 ## Features
 - Set master volume
