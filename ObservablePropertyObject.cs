@@ -6,7 +6,7 @@ namespace WindowsAudioVolumeManager {
 
 		protected void OnPropertyChanged(params string[] propertyNames) {
 			foreach (string propertyName in propertyNames) {
-				PropertyChanged.Invoke(this, new PropertyChangedEventArgs(propertyName));
+				PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 			}
 		}
 	}

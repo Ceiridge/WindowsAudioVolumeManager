@@ -12,7 +12,7 @@ namespace WindowsAudioVolumeManager {
 				float newScalar = (float)(value / MainWindow.MasterSlider.Value);
 				if (newScalar <= 1) {
 					ScalarVolume = newScalar;
-					OnPropertyChanged("Volume", "VolumeText");
+					NotifyVolumeUpdate();
 				}
 			}
 		}
@@ -22,6 +22,10 @@ namespace WindowsAudioVolumeManager {
 			Name = name;
 			ScalarVolume = scalarVolume;
 			MainWindow = mainWindow;
+		}
+
+		public void NotifyVolumeUpdate() {
+			OnPropertyChanged("Volume", "VolumeText");
 		}
 	}
 }

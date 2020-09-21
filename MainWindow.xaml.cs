@@ -10,10 +10,13 @@ namespace WindowsAudioVolumeManager {
 	public partial class MainWindow : Window {
 		private readonly List<MMDevice> Devices = new List<MMDevice>();
 		private readonly ObservableCollection<AudioSessionElement> SessionControls = new ObservableCollection<AudioSessionElement>();
+		private readonly AudioSessionElement DefaultSessionElement;
 
 		public MainWindow() {
 			InitializeComponent();
 			SessionListView.DataContext = SessionControls;
+			DefaultSessionElement = new AudioSessionElement("_Default_App", 1f, this);
+			DefaultSessionSlider.DataContext = DefaultSessionElement;
 
 			Task.Run(() => { // Windows CoreAudio API has to be called in an MTA thread (typical Microsoft logic)
 				using MMDeviceEnumerator deviceEnumerator = new MMDeviceEnumerator();
@@ -62,7 +65,7 @@ namespace WindowsAudioVolumeManager {
 				int masterVol = (int)(masterVolume.MasterVolumeLevelScalar * 100f);
 
 				MasterSlider.Value = masterVol;
-				DefaultSessionSlider.Value = masterVol;
+				DefaultSessionElement.Volume = masterVol;
 			});
 		}
 
@@ -79,6 +82,12 @@ namespace WindowsAudioVolumeManager {
 
 		private void RefreshAppsButton_Click(object sender, RoutedEventArgs e) {
 			Task.Run(RefreshUIData);
+		}
+
+		private void MasterSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e) {
+			foreach(AudioSessionElement element in SessionControls) {
+				element.NotifyVolumeUpdate();
+			}
 		}
 	}
 }
