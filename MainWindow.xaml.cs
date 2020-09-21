@@ -58,7 +58,7 @@ namespace WindowsAudioVolumeManager {
 			Invoke(SessionControls.Clear);
 			foreach (AudioSessionControl session in sessionEnumerator) {
 				using SimpleAudioVolume volume = session.QueryInterface<SimpleAudioVolume>();
-				Invoke(() => SessionControls.Add(new AudioSessionElement(GetSessionName(session), volume.MasterVolume, this)));
+				Invoke(() => SessionControls.Add(new AudioSessionElement(GetSessionName(session), volume.MasterVolume, this, session)));
 			}
 
 			Invoke(() => {
@@ -85,7 +85,7 @@ namespace WindowsAudioVolumeManager {
 
 						if (element == null) {
 							volume.MasterVolume = DefaultSessionElement.ScalarVolume;
-							Invoke(() => SessionControls.Add(new AudioSessionElement(name, volume.MasterVolume, this)));
+							Invoke(() => SessionControls.Add(new AudioSessionElement(name, volume.MasterVolume, this, session)));
 						} else {
 							float masterVol = volume.MasterVolume;
 
@@ -120,7 +120,6 @@ namespace WindowsAudioVolumeManager {
 
 			return (displayName == null || displayName.Length == 0) ? session2.Process.MainModule.ModuleName : displayName;
 		}
-
 
 		private void RefreshAppsButton_Click(object sender, RoutedEventArgs e) {
 			Task.Run(RefreshUIData);

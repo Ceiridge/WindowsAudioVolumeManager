@@ -1,9 +1,11 @@
-﻿using System;
+﻿using CSCore.CoreAudioAPI;
+using System;
 
 namespace WindowsAudioVolumeManager {
 	class AudioSessionElement : ObservablePropertyObject {
 		public float ScalarVolume;
 		private readonly MainWindow MainWindow;
+		private readonly AudioSessionControl SessionControl;
 
 		public string Name { get; set; }
 		public int Volume {
@@ -13,15 +15,21 @@ namespace WindowsAudioVolumeManager {
 				if (newScalar <= 1) {
 					ScalarVolume = newScalar;
 					NotifyVolumeUpdate();
+
+					if (SessionControl != null) {
+						using SimpleAudioVolume volume = SessionControl.QueryInterface<SimpleAudioVolume>();
+						volume.MasterVolume = ScalarVolume;
+					}
 				}
 			}
 		}
 		public string VolumeText => Volume + " (" + (int)(ScalarVolume * 100f) + "%)";
 
-		public AudioSessionElement(string name, float scalarVolume, MainWindow mainWindow) {
+		public AudioSessionElement(string name, float scalarVolume, MainWindow mainWindow, AudioSessionControl sessionControl = null) {
 			Name = name;
 			ScalarVolume = scalarVolume;
 			MainWindow = mainWindow;
+			SessionControl = sessionControl;
 		}
 
 		public void NotifyVolumeUpdate() {
