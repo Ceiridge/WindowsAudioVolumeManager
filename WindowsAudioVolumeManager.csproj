@@ -4,6 +4,17 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>netcoreapp3.1</TargetFramework>
     <UseWPF>true</UseWPF>
+    <Authors>Ceiridge</Authors>
+    <Product>Windows Audio Volume Manager</Product>
+    <Description>A better volume mixer for Windows</Description>
+    <Copyright>GPL-3.0 License, Ceiridge</Copyright>
+    <PackageProjectUrl>https://github.com/Ceiridge/WindowsAudioVolumeManager</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Ceiridge/WindowsAudioVolumeManager</RepositoryUrl>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+    <DebugType>pdbonly</DebugType>
+    <DebugSymbols>true</DebugSymbols>
   </PropertyGroup>
 
   <ItemGroup>
