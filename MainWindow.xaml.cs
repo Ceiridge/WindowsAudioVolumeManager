@@ -10,21 +10,25 @@ using System.Windows.Threading;
 
 namespace WindowsAudioVolumeManager {
 	public partial class MainWindow : Window {
+		public const string DEFAULT_APP_NAME = "_Default_App";
+
 		private readonly List<MMDevice> Devices = new List<MMDevice>();
 		private readonly ObservableCollection<AudioSessionElement> SessionControls = new ObservableCollection<AudioSessionElement>();
-		private readonly ConfigParser Parser;
 
+		public readonly ConfigParser Parser;
 		public List<SavedAudioSession> SavedSessions = new List<SavedAudioSession>();
 		public readonly AudioSessionElement DefaultSessionElement;
+		public bool HasModifiedDefaultSession = false;
 
 		public MainWindow() {
 			InitializeComponent();
 			SessionListView.DataContext = SessionControls;
-			DefaultSessionElement = new AudioSessionElement("_Default_App", 1f, this);
+			DefaultSessionElement = new AudioSessionElement(DEFAULT_APP_NAME, 1f, this);
 			DefaultSessionSlider.DataContext = DefaultSessionElement;
 
 			try {
 				Parser = new ConfigParser(this);
+				Task.Run(Parser.DirtySaverThread);
 				Parser.LoadConfig();
 			} catch (Exception e) {
 				Console.WriteLine(e);
@@ -68,14 +72,25 @@ namespace WindowsAudioVolumeManager {
 			Invoke(SessionControls.Clear);
 			foreach (AudioSessionControl session in sessionEnumerator) {
 				using SimpleAudioVolume volume = session.QueryInterface<SimpleAudioVolume>();
-				Invoke(() => SessionControls.Add(new AudioSessionElement(GetSessionName(session), volume.MasterVolume, this, session)));
+				string name = GetSessionName(session);
+				SavedAudioSession savedSession = Invoke(() => SavedSessions.FirstOrDefault((ss) => ss.Name.Equals(name)));
+
+				if(savedSession == null) {
+					volume.MasterVolume = DefaultSessionElement.ScalarVolume;
+				}
+
+				Invoke(() => SessionControls.Add(new AudioSessionElement(name, volume.MasterVolume, this, session, savedSession)));
 			}
 
 			Invoke(() => {
 				int masterVol = (int)(masterVolume.MasterVolumeLevelScalar * 100f);
 
 				MasterSlider.Value = masterVol;
-				DefaultSessionElement.Volume = masterVol;
+				if (!HasModifiedDefaultSession) {
+					DefaultSessionElement.Volume = masterVol;
+					HasModifiedDefaultSession = true;
+				}
+				DefaultSessionElement.NotifyVolumeUpdate();
 			});
 		}
 
@@ -94,8 +109,10 @@ namespace WindowsAudioVolumeManager {
 						AudioSessionElement element = Invoke(() => SessionControls.FirstOrDefault((element) => element.Name.Equals(name)));
 
 						if (element == null) {
-							volume.MasterVolume = DefaultSessionElement.ScalarVolume;
-							Invoke(() => SessionControls.Add(new AudioSessionElement(name, volume.MasterVolume, this, session)));
+							SavedAudioSession savedSession = Invoke(() => SavedSessions.FirstOrDefault((ss) => ss.Name.Equals(name)));
+							volume.MasterVolume = savedSession != null ? savedSession.ScalarVolume : DefaultSessionElement.ScalarVolume;
+
+							Invoke(() => SessionControls.Add(new AudioSessionElement(name, volume.MasterVolume, this, session, savedSession)));
 						} else {
 							float masterVol = volume.MasterVolume;
 
@@ -112,13 +129,13 @@ namespace WindowsAudioVolumeManager {
 		}
 
 
-		private void Invoke(Action action) { // Helper functions
+		public void Invoke(Action action) { // Helper functions
 			Invoke<object>(() => {
 				action();
 				return null;
 			});
 		}
-		private T Invoke<T>(Func<T> action) {
+		public T Invoke<T>(Func<T> action) {
 			return (T)Dispatcher.Invoke(DispatcherPriority.Normal, action);
 		}
 		private MMDevice GetSelectedDevice() {
@@ -127,8 +144,9 @@ namespace WindowsAudioVolumeManager {
 		private string GetSessionName(AudioSessionControl sessionControl) {
 			string displayName = sessionControl.DisplayName;
 			using AudioSessionControl2 session2 = sessionControl.QueryInterface<AudioSessionControl2>();
+			string name = (displayName == null || displayName.Length == 0) ? session2.Process.MainModule.ModuleName : displayName;
 
-			return (displayName == null || displayName.Length == 0) ? session2.Process.MainModule.ModuleName : displayName;
+			return name.Equals(@"@%SystemRoot%\System32\AudioSrv.Dll,-202") ? "_System Sounds" : name;
 		}
 
 		private void RefreshAppsButton_Click(object sender, RoutedEventArgs e) {
