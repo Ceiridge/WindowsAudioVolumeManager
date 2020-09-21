@@ -5,8 +5,28 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:WindowsAudioVolumeManager"
         mc:Ignorable="d"
-        Title="MainWindow" Height="450" Width="800">
-    <Grid>
-
-    </Grid>
+        Title="Ceiridge's Windows Audio Volume Manager" Height="450" Width="800" WindowStartupLocation="CenterScreen" ResizeMode="CanMinimize">
+	<Grid>
+		<ComboBox x:Name="AudioOutputCombo" HorizontalAlignment="Left" Height="37" Margin="10,10,0,0" VerticalAlignment="Top" Width="567" FontSize="22"/>
+		<ListView x:Name="SessionListView" ItemsSource="{Binding}" HorizontalAlignment="Center" Height="324" Margin="0,100,0,0" VerticalAlignment="Top" Width="780">
+			<ListView.ItemTemplate>
+				<DataTemplate>
+					<Grid Margin="4">
+						<Grid.ColumnDefinitions>
+							<ColumnDefinition Width="Auto" SharedSizeGroup="Key" />
+							<ColumnDefinition Width="*" />
+						</Grid.ColumnDefinitions>
+						<TextBlock Text="{Binding Name}" FontWeight="Bold" />
+						<Slider Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding Volume}" Width="150" HorizontalAlignment="Right" AutoToolTipPlacement="TopLeft" SmallChange="1" />
+					</Grid>
+				</DataTemplate>
+			</ListView.ItemTemplate>
+		</ListView>
+		<Button x:Name="RefreshAppsButton" Content="Refresh Apps" HorizontalAlignment="Right" Height="37" Margin="0,10,10,0" VerticalAlignment="Top" FontSize="22" Click="RefreshAppsButton_Click"/>
+		<WrapPanel Height="52" Margin="10,100,10,0" VerticalAlignment="Top"/>
+		<Slider x:Name="MasterSlider" HorizontalAlignment="Left" Height="23" Margin="10,70,0,0" VerticalAlignment="Top" Width="372" Maximum="100" SmallChange="1" AutoToolTipPlacement="TopLeft"/>
+		<Slider x:Name="DefaultSessionSlider" HorizontalAlignment="Left" Height="23" Margin="387,70,0,0" VerticalAlignment="Top" Width="403" Maximum="100" SmallChange="1" AutoToolTipPlacement="TopLeft"/>
+		<TextBlock HorizontalAlignment="Left" Margin="10,52,0,0" Text="Master Volume" TextWrapping="Wrap" VerticalAlignment="Top"/>
+		<TextBlock HorizontalAlignment="Left" Margin="387,52,0,0" Text="Default Application Volume" TextWrapping="Wrap" VerticalAlignment="Top"/>
+	</Grid>
 </Window>
