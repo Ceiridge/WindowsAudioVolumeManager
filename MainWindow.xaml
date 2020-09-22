@@ -5,9 +5,10 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:WindowsAudioVolumeManager"
         mc:Ignorable="d"
-        Title="Ceiridge's Windows Audio Volume Manager" Height="460" Width="800" WindowStartupLocation="CenterScreen" ResizeMode="CanMinimize">
+        Title="Ceiridge's Windows Audio Volume Manager" Height="460" Width="800" WindowStartupLocation="CenterScreen" ResizeMode="CanMinimize" StateChanged="Window_StateChanged">
 	<Grid>
-		<ComboBox x:Name="AudioOutputCombo" HorizontalAlignment="Left" Height="37" Margin="10,10,0,0" VerticalAlignment="Top" Width="600" FontSize="22"/>
+		<Button x:Name="RefreshAppsButton" Content="Refresh Apps" HorizontalAlignment="Right" Height="37" Margin="0,10,10,0" VerticalAlignment="Top" FontSize="22" Click="RefreshAppsButton_Click" IsEnabled="False"/>
+		<ComboBox x:Name="AudioOutputCombo" HorizontalAlignment="Center" Height="37" Margin="0,10,0,0" VerticalAlignment="Top" Width="780" FontSize="22"/>
 		<ListView x:Name="SessionListView" ItemsSource="{Binding}" HorizontalAlignment="Center" Height="324" Margin="0,100,0,0" VerticalAlignment="Top" Width="780">
 			<ListView.ItemTemplate>
 				<DataTemplate>
@@ -26,10 +27,10 @@
 				</DataTemplate>
 			</ListView.ItemTemplate>
 		</ListView>
-		<Button x:Name="RefreshAppsButton" Content="Refresh Apps" HorizontalAlignment="Right" Height="37" Margin="0,10,10,0" VerticalAlignment="Top" FontSize="22" Click="RefreshAppsButton_Click"/>
 		<Slider x:Name="MasterSlider" HorizontalAlignment="Left" Height="23" Margin="10,70,0,0" VerticalAlignment="Top" Width="372" Maximum="100" SmallChange="1" AutoToolTipPlacement="TopLeft" ValueChanged="MasterSlider_ValueChanged"/>
 		<Slider x:Name="DefaultSessionSlider" HorizontalAlignment="Left" Height="23" Margin="387,70,0,0" VerticalAlignment="Top" Width="389" Maximum="100" SmallChange="1" AutoToolTipPlacement="TopLeft" Value="{Binding Volume, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
 		<TextBlock HorizontalAlignment="Left" Margin="10,52,0,0" Text="Master Volume" TextWrapping="Wrap" VerticalAlignment="Top"/>
 		<TextBlock HorizontalAlignment="Left" Margin="387,52,0,0" Text="Default Application Volume" TextWrapping="Wrap" VerticalAlignment="Top"/>
+		<TextBlock HorizontalAlignment="Left" Margin="10,424,0,0" Text="Hotkey to show this window: CTRL+SHIFT+V" TextWrapping="Wrap" VerticalAlignment="Top"/>
 	</Grid>
 </Window>

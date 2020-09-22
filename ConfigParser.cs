@@ -28,7 +28,7 @@ namespace WindowsAudioVolumeManager {
 		}
 
 		public void SaveConfig() {
-			if(SavedConfigObject == null) {
+			if (SavedConfigObject == null) {
 				SavedConfigObject = new ConfigObject();
 				SavedConfigObject.DefaultVolumeScalar = Window.DefaultSessionElement.ScalarVolume;
 				SavedConfigObject.SavedSessions = Window.SavedSessions;

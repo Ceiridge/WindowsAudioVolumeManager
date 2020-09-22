@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Interop;
 using System.Windows.Threading;
 
 namespace WindowsAudioVolumeManager {
@@ -13,7 +14,8 @@ namespace WindowsAudioVolumeManager {
 		public const string DEFAULT_APP_NAME = "_Default_App";
 
 		private readonly List<MMDevice> Devices = new List<MMDevice>();
-		private readonly ObservableCollection<AudioSessionElement> SessionControls = new ObservableCollection<AudioSessionElement>();
+		private readonly ObservableCollection<AudioSessionElement> SessionElements = new ObservableCollection<AudioSessionElement>();
+		private HotkeyRegistrar HotkeyRegistrar;
 
 		public readonly ConfigParser Parser;
 		public List<SavedAudioSession> SavedSessions = new List<SavedAudioSession>();
@@ -22,7 +24,7 @@ namespace WindowsAudioVolumeManager {
 
 		public MainWindow() {
 			InitializeComponent();
-			SessionListView.DataContext = SessionControls;
+			SessionListView.DataContext = SessionElements;
 			DefaultSessionElement = new AudioSessionElement(DEFAULT_APP_NAME, 1f, this);
 			DefaultSessionSlider.DataContext = DefaultSessionElement;
 
@@ -59,6 +61,15 @@ namespace WindowsAudioVolumeManager {
 
 				Task.Run(VolumeManagerThread);
 			});
+
+			Task.Run(() => {
+				Thread.Sleep(5000); // Delay the hotkey registration to make sure the window exists
+				Invoke(() => {
+					HotkeyRegistrar = new HotkeyRegistrar(new WindowInteropHelper(this).Handle, unchecked((int)0xCE161D6E));
+					HotkeyRegistrar.OnHotkeyPressed += OnHotkeyPressed;
+					HotkeyRegistrar.RegisterHotkey((uint)HotkeyRegistrar.HotkeyModifier.MOD_CONTROL | (uint)HotkeyRegistrar.HotkeyModifier.MOD_SHIFT, 0x56); // VK_V
+				});
+			});
 		}
 
 		/// Has to run in an MTA thread
@@ -69,17 +80,17 @@ namespace WindowsAudioVolumeManager {
 			using AudioSessionManager2 sessionManager = AudioSessionManager2.FromMMDevice(device);
 			using AudioSessionEnumerator sessionEnumerator = sessionManager.GetSessionEnumerator();
 
-			Invoke(SessionControls.Clear);
+			Invoke(SessionElements.Clear);
 			foreach (AudioSessionControl session in sessionEnumerator) {
 				using SimpleAudioVolume volume = session.QueryInterface<SimpleAudioVolume>();
 				string name = GetSessionName(session);
 				SavedAudioSession savedSession = Invoke(() => SavedSessions.FirstOrDefault((ss) => ss.Name.Equals(name)));
 
-				if(savedSession == null) {
+				if (savedSession == null) {
 					volume.MasterVolume = DefaultSessionElement.ScalarVolume;
 				}
 
-				Invoke(() => SessionControls.Add(new AudioSessionElement(name, volume.MasterVolume, this, session, savedSession)));
+				Invoke(() => AddSessionElement(name, volume.MasterVolume, session, savedSession));
 			}
 
 			Invoke(() => {
@@ -106,13 +117,13 @@ namespace WindowsAudioVolumeManager {
 					foreach (AudioSessionControl session in sessionEnumerator) {
 						using SimpleAudioVolume volume = session.QueryInterface<SimpleAudioVolume>();
 						string name = GetSessionName(session);
-						AudioSessionElement element = Invoke(() => SessionControls.FirstOrDefault((element) => element.Name.Equals(name)));
+						AudioSessionElement element = Invoke(() => SessionElements.FirstOrDefault((element) => element.Name.Equals(name)));
 
 						if (element == null) {
 							SavedAudioSession savedSession = Invoke(() => SavedSessions.FirstOrDefault((ss) => ss.Name.Equals(name)));
 							volume.MasterVolume = savedSession != null ? savedSession.ScalarVolume : DefaultSessionElement.ScalarVolume;
 
-							Invoke(() => SessionControls.Add(new AudioSessionElement(name, volume.MasterVolume, this, session, savedSession)));
+							Invoke(() => AddSessionElement(name, volume.MasterVolume, session, savedSession));
 						} else {
 							float masterVol = volume.MasterVolume;
 
@@ -120,6 +131,13 @@ namespace WindowsAudioVolumeManager {
 								element.ScalarVolume = masterVol;
 								element.NotifyVolumeUpdate();
 							}
+						}
+					}
+
+					for (int i = SessionElements.Count - 1; i >= 0; i--) { // Reverse iteration to allow removal
+						AudioSessionElement element = SessionElements[i];
+						if (!sessionEnumerator.Any((session) => element.Name.Equals(GetSessionName(session)))) {
+							Invoke(() => SessionElements.RemoveAt(i));
 						}
 					}
 				} catch (Exception e) {
@@ -148,6 +166,13 @@ namespace WindowsAudioVolumeManager {
 
 			return name.Equals(@"@%SystemRoot%\System32\AudioSrv.Dll,-202") ? "_System Sounds" : name;
 		}
+		private void AddSessionElement(string name, float scalarVolume, AudioSessionControl session, SavedAudioSession savedSession) {
+			if (!SessionElements.Any((element) => element.Name.Equals(name))) {
+				SessionElements.Add(new AudioSessionElement(name, scalarVolume, this, session, savedSession));
+			}
+		}
+
+
 
 		private void RefreshAppsButton_Click(object sender, RoutedEventArgs e) {
 			Task.Run(RefreshUIData);
@@ -158,9 +183,21 @@ namespace WindowsAudioVolumeManager {
 			using AudioEndpointVolume masterVolume = AudioEndpointVolume.FromDevice(device);
 			masterVolume.MasterVolumeLevelScalar = (float)(MasterSlider.Value / 100f);
 
-			foreach (AudioSessionElement element in SessionControls) {
+			foreach (AudioSessionElement element in SessionElements) {
 				element.NotifyVolumeUpdate();
 			}
+		}
+
+		private void Window_StateChanged(object sender, EventArgs e) {
+			if (WindowState == WindowState.Minimized) {
+				Hide();
+			}
+		}
+
+		private void OnHotkeyPressed(object sender, EventArgs e) {
+			Show();
+			Focus();
+			WindowState = WindowState.Normal;
 		}
 	}
 }

@@ -55,7 +55,7 @@ namespace WindowsAudioVolumeManager {
 							MainWindow.SavedSessions.Remove(SavedSession);
 						}
 
-						if(MainWindow.Parser != null) {
+						if (MainWindow.Parser != null) {
 							MainWindow.Parser.Dirty = true;
 						}
 					});
