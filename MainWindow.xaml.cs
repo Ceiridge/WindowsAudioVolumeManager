@@ -199,5 +199,18 @@ namespace WindowsAudioVolumeManager {
 			Focus();
 			WindowState = WindowState.Normal;
 		}
+
+		private bool rendered;
+		protected override void OnContentRendered(EventArgs e) {
+			base.OnContentRendered(e);
+
+			if (rendered) {
+				return;
+			}
+
+			rendered = true;
+			WindowState = WindowState.Minimized; // Minimize by default
+			Hide();
+		}
 	}
 }
