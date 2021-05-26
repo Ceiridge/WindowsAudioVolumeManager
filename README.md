@@ -1,5 +1,6 @@
 # Windows Audio Volume Manager
-A better volume mixer for Windows
+A better volume mixer for Windows.
+
 Press Ctrl+Shift+V to open the GUI
 
 ## Screenshot
