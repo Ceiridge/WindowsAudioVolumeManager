@@ -2,119 +2,100 @@ using System.Windows.Input;
 using WindowsAudioVolumeManager.Audio;
 
 namespace WindowsAudioVolumeManager.ViewModels {
-	/// <summary>
-	/// One row in the session list. Represents all audio session instances sharing
-	/// the same application name; can also represent a saved application that is
-	/// currently not playing audio (IsActive = false).
-	/// Volumes are absolute (0-100 % of the device), unlike the legacy
-	/// master-relative math that could divide by zero.
-	/// </summary>
+	/// <summary>One application group on one output (or a legacy global application row).</summary>
 	public class SessionViewModel : ViewModelBase {
 		private readonly MainViewModel _owner;
 		private int _volume;
 		private bool _saved;
+		private bool _maintain;
+		private bool _suppress;
 		private bool _isActive;
-		private bool _suppressApply;
+		private string _deviceName = "";
+		private string _ruleSummary = "";
+		private string _liveText = "";
 		private DateTime? _lastSeenAt;
 
-		/// <summary>Internal name, matches the persisted key (e.g. "_System Sounds", "chrome.exe").</summary>
-		public string Name { get; }
-
-		public bool IsSystemSounds { get; }
-
-		public ICommand RemoveSavedCommand { get; }
-
-		public SessionViewModel(MainViewModel owner, string name, int volume, bool saved, bool isActive, DateTime? lastSeenAt) {
-			_owner = owner;
-			Name = name;
-			IsSystemSounds = name == SessionNaming.SystemSoundsName;
-			_volume = Math.Clamp(volume, 0, 100);
-			_saved = saved;
-			_isActive = isActive;
-			_lastSeenAt = lastSeenAt;
-			RemoveSavedCommand = new RelayCommand(() => Saved = false, () => Saved);
-		}
-
-		/// <summary>Pretty name for the UI; persistence keeps using <see cref="Name"/>.</summary>
+		public VolumeKey Key { get; }
+		public string Name => Key.Name;
+		public string DeviceId { get; private set; } = "";
+		public string DeviceName { get => _deviceName; private set => SetField(ref _deviceName, value); }
 		public string DisplayName => IsSystemSounds ? "System Sounds" : Name;
+		public bool IsSystemSounds => Name == SessionNaming.SystemSoundsName;
+		public bool CanSave => Name != "Unknown Session";
+		public bool CanMaintain => !Key.IsGlobal && Saved && CanSave;
+		public string SavedLabel => Key.IsGlobal ? "Saved" : "Override";
+		public string GroupLabel => Key.IsGlobal ? (IsSystemSounds ? "System" : IsActive ? "Running Apps" : "Saved · not running") : DeviceName;
+		public ICommand RemoveSavedCommand { get; }
+		public ICommand ResumeMaintenanceCommand { get; }
 
-		/// <summary>Group header the list is grouped by; order is enforced by the owner's sort.</summary>
-		public string GroupLabel => IsSystemSounds ? "System" : IsActive ? "Running Apps" : "Saved · not running";
+		public SessionViewModel(MainViewModel owner, VolumeKey key) {
+			_owner = owner;
+			Key = key;
+			RemoveSavedCommand = new RelayCommand(() => Saved = false, () => Saved);
+			ResumeMaintenanceCommand = new RelayCommand(() => _owner.ResumeMaintenance(this), () => CanMaintain && MaintainVolume);
+		}
 
 		public int Volume {
 			get => _volume;
 			set {
 				int clamped = Math.Clamp(value, 0, 100);
-				if (_volume == clamped) {
-					return;
-				}
-
-				_volume = clamped;
-				OnPropertyChanged();
-				OnPropertyChanged(nameof(VolumeText));
-
-				if (!_suppressApply) {
-					_owner.ApplySessionVolume(this);
+				if (SetField(ref _volume, clamped)) {
+					OnPropertyChanged(nameof(VolumeText));
+					if (!_suppress) { _owner.ApplySessionVolume(this); }
 				}
 			}
 		}
-
-		public string VolumeText => _volume + " %";
+		public string VolumeText => Volume + " %";
+		public string RuleSummary { get => _ruleSummary; private set => SetField(ref _ruleSummary, value); }
+		public string LiveText { get => _liveText; private set => SetField(ref _liveText, value); }
+		public bool IsActive { get => _isActive; private set => SetField(ref _isActive, value); }
+		public DateTime? LastSeenAt { get => _lastSeenAt; set { if (SetField(ref _lastSeenAt, value)) { OnPropertyChanged(nameof(LastSeenText)); } } }
+		public string LastSeenText => IsActive ? "Observed on this output" : LastSeenAt.HasValue ? "Last observed: " + LastSeenAt.Value.ToString("g") : "Not currently observed (inactive, disconnected or unmanaged)";
 
 		public bool Saved {
 			get => _saved;
 			set {
+				if (value && !CanSave && !_suppress) { return; }
 				if (SetField(ref _saved, value)) {
+					if (!value) { _maintain = false; OnPropertyChanged(nameof(MaintainVolume)); }
+					OnPropertyChanged(nameof(CanMaintain));
 					(RemoveSavedCommand as RelayCommand)?.RaiseCanExecuteChanged();
-					_owner.ApplySavedChanged(this);
+					if (!_suppress) { _owner.ApplySavedChanged(this); }
 				}
 			}
 		}
 
-		public bool IsActive {
-			get => _isActive;
+		public bool MaintainVolume {
+			get => _maintain;
 			set {
-				if (SetField(ref _isActive, value)) {
-					OnPropertyChanged(nameof(GroupLabel));
-					OnPropertyChanged(nameof(LastSeenText));
+				if (value && !CanMaintain) { return; }
+				if (SetField(ref _maintain, value)) {
+					(ResumeMaintenanceCommand as RelayCommand)?.RaiseCanExecuteChanged();
+					if (!_suppress) { _owner.ApplyMaintainChanged(this); }
 				}
 			}
 		}
 
-		public DateTime? LastSeenAt {
-			get => _lastSeenAt;
-			set {
-				if (SetField(ref _lastSeenAt, value)) {
-					OnPropertyChanged(nameof(LastSeenText));
-				}
-			}
-		}
-
-		public string LastSeenText {
-			get {
-				if (IsActive) {
-					return "Running now";
-				}
-				if (_lastSeenAt == null) {
-					return "Last active: unknown";
-				}
-
-				int days = (int)(DateTime.Now.Date - _lastSeenAt.Value.Date).TotalDays;
-				return "Last active: " + days switch {
-					<= 0 => "today",
-					1 => "yesterday",
-					< 30 => $"{days} days ago",
-					< 365 => $"{days / 30} months ago",
-					_ => $"{days / 365} years ago"
-				};
-			}
-		}
-
-		/// <summary>Update from a CoreAudio notification without echoing back to the device.</summary>
-		public void UpdateVolumeFromDevice(float scalarVolume) {
-			_suppressApply = true;
-			Volume = (int)Math.Round(scalarVolume * 100f);
-			_suppressApply = false;
+		public void Update(string deviceId, string deviceName, IReadOnlyList<AudioSessionInfo> live,
+			VolumeDecision decision, bool saved, DateTime? seen) {
+			_suppress = true;
+			try {
+				DeviceId = deviceId;
+				DeviceName = Key.IsGlobal ? "Global app setting" : deviceName;
+				Saved = saved;
+				MaintainVolume = decision.MaintainVolume;
+				IsActive = live.Count > 0;
+				LastSeenAt = seen;
+				float minimum = IsActive ? live.Min(s => s.ScalarVolume) : decision.ScalarVolume;
+				float maximum = IsActive ? live.Max(s => s.ScalarVolume) : decision.ScalarVolume;
+				bool mixed = Math.Abs(maximum - minimum) > CorrectionGate.Tolerance;
+				Volume = (int)Math.Round((MaintainVolume ? decision.ScalarVolume : minimum) * 100f);
+				RuleSummary = decision.Source + $" · target {(int)Math.Round(decision.ScalarVolume * 100f)} %";
+				LiveText = mixed ? $"Mixed live volumes: {minimum * 100f:0.#}–{maximum * 100f:0.#} % (slider edits the group)"
+					: IsActive ? $"Live: {minimum * 100f:0.#} % · {live.Count} session(s)" : LastSeenText;
+				OnPropertyChanged(nameof(GroupLabel));
+				OnPropertyChanged(nameof(LastSeenText));
+			} finally { _suppress = false; }
 		}
 	}
 }
