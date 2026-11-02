@@ -63,20 +63,24 @@ namespace WindowsAudioVolumeManager {
 			_database.Initialize();
 
 			SettingsRepository settingsRepository = new(_database);
-			JsonConfigMigrator.MigrateIfNeeded(_database, settingsRepository);
+			if (!Database.UsesIsolatedProfile) {
+				JsonConfigMigrator.MigrateIfNeeded(_database, settingsRepository);
+			}
 
 			SessionVolumeRepository sessionRepository = new(_database);
 			List<SavedSessionRecord> savedRecords = sessionRepository.GetAllDetailed();
 			VolumePolicy policy = new() {
-				DefaultVolumeScalar = settingsRepository.GetFloat(SettingsRepository.Keys.DefaultVolumeScalar, 1f)
+				DefaultVolumeScalar = settingsRepository.GetFloat(SettingsRepository.Keys.DefaultVolumeScalar, Database.UsesIsolatedProfile ? 0.05f : 1f)
 			};
 			policy.Load(savedRecords.ToDictionary(r => r.Name, r => r.ScalarVolume));
+			List<SavedDeviceRecord> deviceRecords = new DeviceVolumeRepository(_database).GetAll();
+			policy.LoadDevices(deviceRecords.Select(r => r.Rule));
 
 			_writer = new DebouncedWriter(_database);
 			_audioService = new AudioDeviceService(policy);
 
 			SettingsViewModel settings = new(settingsRepository);
-			_mainViewModel = new MainViewModel(_audioService, policy, _writer, settings, savedRecords, Dispatcher);
+			_mainViewModel = new MainViewModel(_audioService, policy, _writer, settings, savedRecords, deviceRecords, Dispatcher);
 
 			_mainWindow = new MainWindow(_mainViewModel, settings);
 			MainWindow = _mainWindow;
@@ -107,7 +111,7 @@ namespace WindowsAudioVolumeManager {
 			_showSignalRegistration = ThreadPool.RegisterWaitForSingleObject(_showSignal!,
 				(_, _) => Dispatcher.BeginInvoke(ShowMainWindow), null, Timeout.Infinite, executeOnlyOnce: false);
 
-			if (!settings.StartMinimized) {
+			if (!settings.StartMinimized || Environment.GetCommandLineArgs().Contains("--show")) {
 				_mainWindow.Show();
 			}
 		}

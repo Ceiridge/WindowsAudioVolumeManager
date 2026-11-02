@@ -1,204 +1,117 @@
 <Window x:Class="WindowsAudioVolumeManager.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        mc:Ignorable="d"
-        Title="Ceiridge's Windows Audio Volume Manager" Height="560" Width="840"
-        MinHeight="420" MinWidth="660"
-        WindowStartupLocation="CenterScreen"
-        StateChanged="Window_StateChanged">
-	<Grid Margin="12">
-		<Grid.RowDefinitions>
-			<RowDefinition Height="Auto" />
-			<RowDefinition Height="Auto" />
-			<RowDefinition Height="Auto" />
-			<RowDefinition Height="*" />
-			<RowDefinition Height="Auto" />
-			<RowDefinition Height="Auto" />
-		</Grid.RowDefinitions>
+        Title="Windows Audio Volume Manager — device volumes preview 3"
+        Height="730" Width="1050" MinHeight="580" MinWidth="870"
+        WindowStartupLocation="CenterScreen" StateChanged="Window_StateChanged">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolVisibility" />
+    </Window.Resources>
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/><RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <DockPanel Grid.Row="0" Margin="0,0,0,8">
+            <Button DockPanel.Dock="Right" Content="Refresh" Padding="16,4" Margin="8,0,0,0" Command="{Binding RefreshCommand}"/>
+            <TextBlock DockPanel.Dock="Left" Text="Master output:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <ComboBox ItemsSource="{Binding Devices}" SelectedItem="{Binding SelectedDevice}" DisplayMemberPath="DisplayName"
+                      VerticalContentAlignment="Center" ToolTip="In device mode, selecting an output here does not change the set of managed outputs."/>
+        </DockPanel>
+        <Grid Grid.Row="1" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+            <GroupBox Grid.Column="0" Header="Selected output — master volume" Margin="0,0,4,0" Padding="8,4" IsEnabled="{Binding HasSelectedDevice}">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Right" Text="{Binding MasterVolumeText}" Width="50" VerticalAlignment="Center" TextAlignment="Right"/>
+                    <Slider Minimum="0" Maximum="100" SmallChange="1" IsMoveToPointEnabled="True" Value="{Binding MasterVolume, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                </DockPanel>
+            </GroupBox>
+            <GroupBox Grid.Column="1" Header="Default for new apps without a saved rule" Margin="4,0,0,0" Padding="8,4">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Right" Text="{Binding DefaultVolumeText}" Width="50" VerticalAlignment="Center" TextAlignment="Right"/>
+                    <Slider Minimum="0" Maximum="100" SmallChange="1" IsMoveToPointEnabled="True" Value="{Binding DefaultVolume, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                </DockPanel>
+            </GroupBox>
+        </Grid>
+        <StackPanel Grid.Row="2" Margin="0,0,0,8">
+            <CheckBox Content="Separate volumes by output device" FontWeight="SemiBold"
+                      IsChecked="{Binding Settings.SeparateVolumesByDevice, Mode=TwoWay}"
+                      ToolTip="Opt-in mode. Switching mode reapplies its saved rules. Lower your physical output volume before initial tests."/>
+            <Border BorderBrush="LightGray" BorderThickness="1" Padding="8" Margin="0,6,0,0"
+                    Visibility="{Binding Settings.SeparateVolumesByDevice, Converter={StaticResource BoolVisibility}}">
+                <StackPanel>
+                    <TextBlock Text="Manage these outputs simultaneously:" FontWeight="SemiBold"/>
+                    <ScrollViewer MaxHeight="105" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding DeviceChoices}">
+                            <ItemsControl.ItemTemplate><DataTemplate>
+                                <CheckBox Content="{Binding Label}" Margin="0,3,0,0" IsChecked="{Binding Managed, Mode=TwoWay}" ToolTip="{Binding Id}"/>
+                            </DataTemplate></ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                    <TextBlock Text="The Windows default is also managed while Follow Windows default device is enabled. Unchecking that option makes the checked list exclusive."
+                               TextWrapping="Wrap" Foreground="Gray" Margin="0,5,0,0"/>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+        <TextBox Grid.Row="3" x:Name="SearchBox" Margin="0,0,0,8" Padding="4,3"
+                 Text="{Binding SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                 ToolTip="Search applications or outputs; Esc clears the filter" PreviewKeyDown="SearchBox_PreviewKeyDown"/>
+        <ListView Grid.Row="4" ItemsSource="{Binding SessionsView}" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListView.ItemContainerStyle><Style TargetType="ListViewItem">
+                <Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="6,6"/>
+            </Style></ListView.ItemContainerStyle>
+            <ListView.GroupStyle><GroupStyle><GroupStyle.HeaderTemplate><DataTemplate>
+                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Foreground="Gray" Margin="4,10,4,3" TextWrapping="Wrap"/>
+            </DataTemplate></GroupStyle.HeaderTemplate></GroupStyle></ListView.GroupStyle>
+            <ListView.ItemTemplate><DataTemplate>
+                <Grid>
+                    <Grid.ContextMenu><ContextMenu>
+                        <MenuItem Header="{Binding LastSeenText}" IsEnabled="False"/>
+                        <MenuItem Header="Reapply saved volume now" Command="{Binding ResumeMaintenanceCommand}"/>
+                        <MenuItem Header="Remove this saved rule" Command="{Binding RemoveSavedCommand}"/>
+                    </ContextMenu></Grid.ContextMenu>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="265"/><ColumnDefinition/><ColumnDefinition Width="50"/><ColumnDefinition Width="160"/></Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <StackPanel Grid.Column="0" ToolTip="{Binding DeviceId}">
+                        <TextBlock Text="{Binding DisplayName}" FontWeight="Bold" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding RuleSummary}" FontSize="11" Foreground="Gray" TextWrapping="Wrap"/>
+                    </StackPanel>
+                    <Slider Grid.Column="1" Minimum="0" Maximum="100" SmallChange="1" Margin="8,0" VerticalAlignment="Center"
+                            IsMoveToPointEnabled="True" Value="{Binding Volume, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                    <TextBlock Grid.Column="2" Text="{Binding VolumeText}" VerticalAlignment="Center" TextAlignment="Right"/>
+                    <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0">
+                        <CheckBox Content="{Binding SavedLabel}" IsChecked="{Binding Saved, Mode=TwoWay}" IsEnabled="{Binding CanSave}"
+                                  ToolTip="Device mode: save an override only for this output. Removing it restores the inherited rule. A mixed group is saved at the slider value."/>
+                        <CheckBox Content="Maintain" Margin="8,0,0,0" IsChecked="{Binding MaintainVolume, Mode=TwoWay}" IsEnabled="{Binding CanMaintain}"
+                                  ToolTip="Opt-in lock: changes from other apps or the Windows mixer are corrected. Edit the slider here to change the target. Does not change mute. The first deviation is corrected immediately; repeated changes are lightly paced without disabling Maintain. Reapply saved volume is also available in the context menu."/>
+                    </StackPanel>
+                    <TextBlock Grid.Row="1" Grid.ColumnSpan="3" Text="{Binding LiveText}" FontSize="11" Foreground="Gray" TextWrapping="Wrap" Margin="0,3,0,0"/>
 
-		<!-- Device selection -->
-		<DockPanel Grid.Row="0" Margin="0,0,0,8">
-			<Button DockPanel.Dock="Right" Content="Refresh" Padding="16,4" Margin="8,0,0,0"
-			        Command="{Binding RefreshCommand}" />
-			<ComboBox ItemsSource="{Binding Devices}" SelectedItem="{Binding SelectedDevice}"
-			          DisplayMemberPath="DisplayName" VerticalContentAlignment="Center" />
-		</DockPanel>
-
-		<!-- Master + default volume -->
-		<Grid Grid.Row="1" Margin="0,0,0,8">
-			<Grid.ColumnDefinitions>
-				<ColumnDefinition Width="*" />
-				<ColumnDefinition Width="*" />
-			</Grid.ColumnDefinitions>
-
-			<GroupBox Grid.Column="0" Header="Master Volume" Margin="0,0,4,0" Padding="8,4">
-				<DockPanel>
-					<TextBlock DockPanel.Dock="Right" Text="{Binding MasterVolumeText}" Width="44"
-					           VerticalAlignment="Center" TextAlignment="Right" />
-					<Slider Minimum="0" Maximum="100" SmallChange="1" IsMoveToPointEnabled="True"
-					        Value="{Binding MasterVolume, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-					        VerticalAlignment="Center" AutoToolTipPlacement="TopLeft" />
-				</DockPanel>
-			</GroupBox>
-
-			<GroupBox Grid.Column="1" Margin="4,0,0,0" Padding="8,4"
-			          Header="Default Application Volume (new apps)">
-				<DockPanel>
-					<TextBlock DockPanel.Dock="Right" Text="{Binding DefaultVolumeText}" Width="44"
-					           VerticalAlignment="Center" TextAlignment="Right" />
-					<Slider Minimum="0" Maximum="100" SmallChange="1" IsMoveToPointEnabled="True"
-					        Value="{Binding DefaultVolume, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-					        VerticalAlignment="Center" AutoToolTipPlacement="TopLeft" />
-				</DockPanel>
-			</GroupBox>
-		</Grid>
-
-		<!-- Search -->
-		<Grid Grid.Row="2" Margin="0,0,0,8">
-			<TextBox x:Name="SearchBox" Padding="4,3"
-			         Text="{Binding SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-			         PreviewKeyDown="SearchBox_PreviewKeyDown" />
-			<TextBlock Text="Search apps… (Esc to clear)" Foreground="Gray" Margin="8,0,0,0"
-			           VerticalAlignment="Center" IsHitTestVisible="False">
-				<TextBlock.Style>
-					<Style TargetType="TextBlock">
-						<Setter Property="Visibility" Value="Collapsed" />
-						<Style.Triggers>
-							<DataTrigger Binding="{Binding Text, ElementName=SearchBox}" Value="">
-								<Setter Property="Visibility" Value="Visible" />
-							</DataTrigger>
-						</Style.Triggers>
-					</Style>
-				</TextBlock.Style>
-			</TextBlock>
-		</Grid>
-
-		<!-- Sessions -->
-		<ListView Grid.Row="3" ItemsSource="{Binding SessionsView}"
-		          ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-			<ListView.ItemContainerStyle>
-				<Style TargetType="ListViewItem">
-					<Setter Property="HorizontalContentAlignment" Value="Stretch" />
-					<Setter Property="Padding" Value="6,4" />
-				</Style>
-			</ListView.ItemContainerStyle>
-			<ListView.GroupStyle>
-				<GroupStyle>
-					<GroupStyle.HeaderTemplate>
-						<DataTemplate>
-							<StackPanel Margin="2,6,2,2">
-								<TextBlock Text="{Binding Name}" FontSize="11" FontWeight="SemiBold" Foreground="Gray" />
-								<Separator Margin="0,2,0,0" />
-							</StackPanel>
-						</DataTemplate>
-					</GroupStyle.HeaderTemplate>
-				</GroupStyle>
-			</ListView.GroupStyle>
-			<ListView.ItemTemplate>
-				<DataTemplate>
-					<Grid>
-						<Grid.Style>
-							<Style TargetType="Grid">
-								<Style.Triggers>
-									<DataTrigger Binding="{Binding IsActive}" Value="False">
-										<Setter Property="Opacity" Value="0.55" />
-									</DataTrigger>
-								</Style.Triggers>
-							</Style>
-						</Grid.Style>
-						<Grid.ContextMenu>
-							<ContextMenu>
-								<MenuItem Header="{Binding LastSeenText}" IsEnabled="False" />
-								<Separator />
-								<MenuItem Header="Remove from saved" Command="{Binding RemoveSavedCommand}" />
-							</ContextMenu>
-						</Grid.ContextMenu>
-						<Grid.ColumnDefinitions>
-							<ColumnDefinition Width="230" />
-							<ColumnDefinition Width="*" />
-							<ColumnDefinition Width="52" />
-							<ColumnDefinition Width="Auto" />
-						</Grid.ColumnDefinitions>
-
-						<StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-							<TextBlock Text="🔔" Margin="0,0,6,0" VerticalAlignment="Center">
-								<TextBlock.Style>
-									<Style TargetType="TextBlock">
-										<Setter Property="Visibility" Value="Collapsed" />
-										<Style.Triggers>
-											<DataTrigger Binding="{Binding IsSystemSounds}" Value="True">
-												<Setter Property="Visibility" Value="Visible" />
-											</DataTrigger>
-										</Style.Triggers>
-									</Style>
-								</TextBlock.Style>
-							</TextBlock>
-							<TextBlock Text="{Binding DisplayName}" FontWeight="Bold" VerticalAlignment="Center"
-							           TextTrimming="CharacterEllipsis" MaxWidth="200" ToolTip="{Binding LastSeenText}">
-								<TextBlock.Style>
-									<Style TargetType="TextBlock">
-										<Style.Triggers>
-											<DataTrigger Binding="{Binding IsSystemSounds}" Value="True">
-												<Setter Property="Foreground" Value="#3E8EE0" />
-											</DataTrigger>
-										</Style.Triggers>
-									</Style>
-								</TextBlock.Style>
-							</TextBlock>
-						</StackPanel>
-
-						<Slider Grid.Column="1" Minimum="0" Maximum="100" SmallChange="1" IsMoveToPointEnabled="True"
-						        Value="{Binding Volume, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-						        VerticalAlignment="Center" Margin="8,0" AutoToolTipPlacement="TopLeft" />
-
-						<TextBlock Grid.Column="2" Text="{Binding VolumeText, Mode=OneWay}"
-						           VerticalAlignment="Center" TextAlignment="Right" />
-
-						<CheckBox Grid.Column="3" Content="Saved" Margin="12,0,4,0" VerticalAlignment="Center"
-						          IsChecked="{Binding Saved, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-						          ToolTip="Remember this app's volume and re-apply it whenever the app plays audio" />
-					</Grid>
-				</DataTemplate>
-			</ListView.ItemTemplate>
-		</ListView>
-
-		<!-- Settings -->
-		<Expander Grid.Row="4" Header="Settings" Margin="0,8,0,0">
-			<Grid Margin="8">
-				<Grid.RowDefinitions>
-					<RowDefinition Height="Auto" />
-					<RowDefinition Height="Auto" />
-				</Grid.RowDefinitions>
-
-				<StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
-					<TextBlock Text="Show window hotkey:" VerticalAlignment="Center" Margin="0,0,8,0" />
-					<TextBox x:Name="HotkeyBox" Width="180" IsReadOnly="True" IsReadOnlyCaretVisible="False"
-					         Text="{Binding Settings.HotkeyDisplay, Mode=OneWay}"
-					         PreviewKeyDown="HotkeyBox_PreviewKeyDown"
-					         ToolTip="Click here, then press the new key combination (must include Ctrl, Alt or Win)" />
-					<TextBlock Text="Click the box and press a key combination" Foreground="Gray"
-					           VerticalAlignment="Center" Margin="8,0,0,0" />
-				</StackPanel>
-
-				<WrapPanel Grid.Row="1">
-					<CheckBox Content="Show tray icon" Margin="0,0,16,0"
-					          IsChecked="{Binding Settings.TrayIconEnabled, Mode=TwoWay}" />
-					<CheckBox Content="Start with Windows" Margin="0,0,16,0"
-					          IsChecked="{Binding Settings.Autostart, Mode=TwoWay}" />
-					<CheckBox Content="Start minimized" Margin="0,0,16,0"
-					          IsChecked="{Binding Settings.StartMinimized, Mode=TwoWay}" />
-					<CheckBox Content="Follow Windows default device" Margin="0,0,16,0"
-					          IsChecked="{Binding Settings.FollowDefaultDevice, Mode=TwoWay}" />
-				</WrapPanel>
-			</Grid>
-		</Expander>
-
-		<!-- Status line -->
-		<DockPanel Grid.Row="5" Margin="0,8,0,0">
-			<TextBlock DockPanel.Dock="Right" Text="{Binding HotkeyStatusText}" Foreground="Gray" />
-			<TextBlock Text="{Binding StatusText}" Foreground="Gray" TextTrimming="CharacterEllipsis" />
-		</DockPanel>
-	</Grid>
+                </Grid>
+            </DataTemplate></ListView.ItemTemplate>
+        </ListView>
+        <Expander Grid.Row="5" Header="Settings" Margin="0,8,0,0">
+            <StackPanel Margin="8">
+                <TextBlock Text="{Binding Settings.ProfileNotice}" Foreground="Gray" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                <WrapPanel Margin="0,0,0,8">
+                    <CheckBox Content="Show tray icon" Margin="0,0,16,0" IsChecked="{Binding Settings.TrayIconEnabled, Mode=TwoWay}"/>
+                    <CheckBox Content="Start with Windows" Margin="0,0,16,0" ToolTip="{Binding Settings.ProfileNotice}" ToolTipService.ShowOnDisabled="True" IsEnabled="{Binding Settings.CanAutostart}" IsChecked="{Binding Settings.Autostart, Mode=TwoWay}"/>
+                    <CheckBox Content="Start minimized" Margin="0,0,16,0" IsChecked="{Binding Settings.StartMinimized, Mode=TwoWay}"/>
+                    <CheckBox Content="Follow Windows default device" IsChecked="{Binding Settings.FollowDefaultDevice, Mode=TwoWay}"/>
+                </WrapPanel>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="Show window hotkey:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBox x:Name="HotkeyBox" Width="180" IsReadOnly="True" IsReadOnlyCaretVisible="False"
+                             Text="{Binding Settings.HotkeyDisplay, Mode=OneWay}" PreviewKeyDown="HotkeyBox_PreviewKeyDown"
+                             ToolTip="Press a combination including Ctrl, Alt or Win"/>
+                </StackPanel>
+            </StackPanel>
+        </Expander>
+        <DockPanel Grid.Row="6" Margin="0,8,0,0">
+            <TextBlock DockPanel.Dock="Right" Text="{Binding HotkeyStatusText}" Foreground="Gray" Margin="8,0,0,0"/>
+            <TextBlock Text="{Binding StatusText}" Foreground="Gray" TextTrimming="CharacterEllipsis" ToolTip="{Binding StatusText}"/>
+        </DockPanel>
+    </Grid>
 </Window>

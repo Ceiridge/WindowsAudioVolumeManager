@@ -1,5 +1,6 @@
-using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Threading;
@@ -12,8 +13,9 @@ namespace WindowsAudioVolumeManager.ViewModels {
 		private readonly VolumePolicy _policy;
 		private readonly DebouncedWriter _writer;
 		private readonly Dispatcher _dispatcher;
-		private readonly Dictionary<string, DateTime?> _lastSeen;
-
+		private readonly Dictionary<VolumeKey, DateTime?> _lastSeen = new();
+		private readonly Dictionary<string, string> _deviceNames = new(StringComparer.Ordinal);
+		private IReadOnlyList<AudioSessionInfo> _live = [];
 		private AudioDeviceInfo? _selectedDevice;
 		private bool _suppressDeviceApply;
 		private int _masterVolume;
@@ -24,262 +26,237 @@ namespace WindowsAudioVolumeManager.ViewModels {
 		private string _hotkeyStatusText = "";
 
 		public ObservableCollection<AudioDeviceInfo> Devices { get; } = [];
+		public ObservableCollection<DeviceChoiceViewModel> DeviceChoices { get; } = [];
 		public ObservableCollection<SessionViewModel> Sessions { get; } = [];
-		/// <summary>Grouped (System / Running Apps / Saved) and search-filtered view over <see cref="Sessions"/>.</summary>
 		public ICollectionView SessionsView { get; }
 		public ICommand RefreshCommand { get; }
 		public SettingsViewModel Settings { get; }
+		public bool HasSelectedDevice => SelectedDevice != null;
 
 		public MainViewModel(AudioDeviceService audioService, VolumePolicy policy, DebouncedWriter writer,
-			SettingsViewModel settings, IEnumerable<SavedSessionRecord> savedRecords, Dispatcher dispatcher) {
+			SettingsViewModel settings, IEnumerable<SavedSessionRecord> savedRecords,
+			IEnumerable<SavedDeviceRecord> deviceRecords, Dispatcher dispatcher) {
 			_audioService = audioService;
 			_policy = policy;
 			_writer = writer;
 			Settings = settings;
 			_dispatcher = dispatcher;
-			_lastSeen = savedRecords.ToDictionary(r => r.Name, r => r.LastSeenAt);
-
+			foreach (SavedSessionRecord record in savedRecords) { _lastSeen[VolumeKey.Global(record.Name)] = record.LastSeenAt; }
+			foreach (SavedDeviceRecord record in deviceRecords) {
+				_lastSeen[record.Rule.Key] = record.LastSeenAt;
+				_deviceNames[record.Rule.Key.DeviceId] = record.Rule.DeviceName;
+			}
 			_defaultVolume = (int)Math.Round(_policy.DefaultVolumeScalar * 100f);
 			RefreshCommand = new RelayCommand(_audioService.RequestRefresh);
-
 			SessionsView = CollectionViewSource.GetDefaultView(Sessions);
 			SessionsView.GroupDescriptions.Add(new PropertyGroupDescription(nameof(SessionViewModel.GroupLabel)));
 			SessionsView.Filter = item => string.IsNullOrWhiteSpace(_searchText)
-				|| ((SessionViewModel)item).DisplayName.Contains(_searchText.Trim(), StringComparison.OrdinalIgnoreCase);
+				|| ((SessionViewModel)item).DisplayName.Contains(_searchText.Trim(), StringComparison.OrdinalIgnoreCase)
+				|| ((SessionViewModel)item).DeviceName.Contains(_searchText.Trim(), StringComparison.OrdinalIgnoreCase);
 
-			_audioService.DevicesChanged += (devices, currentId) =>
-				_dispatcher.BeginInvoke(() => UpdateDevices(devices, currentId));
-			_audioService.MasterVolumeChanged += scalar =>
-				_dispatcher.BeginInvoke(() => UpdateMasterVolumeFromDevice(scalar));
-			_audioService.SessionsChanged += snapshot =>
-				_dispatcher.BeginInvoke(() => MergeSessions(snapshot));
-			_audioService.SessionVolumeChanged += (name, scalar) =>
-				_dispatcher.BeginInvoke(() => UpdateSessionVolumeFromDevice(name, scalar));
-			_audioService.ErrorOccurred += message =>
-				_dispatcher.BeginInvoke(() => StatusText = message);
-
-			// Show saved-but-not-running apps right away so they can be edited/unsaved.
-			MergeSessions([]);
+			_audioService.DevicesChanged += (devices, id, revision) => _dispatcher.BeginInvoke(() => {
+				if (revision == _audioService.ConfigurationVersion) { UpdateDevices(devices, id); }
+			});
+			_audioService.MasterVolumeChanged += (id, volume, revision) => _dispatcher.BeginInvoke(() => {
+				if (revision == _audioService.ConfigurationVersion && id == SelectedDevice?.Id) {
+					_suppressMasterApply = true;
+					try { MasterVolume = (int)Math.Round(volume * 100f); } finally { _suppressMasterApply = false; }
+				}
+			});
+			_audioService.SessionsChanged += snapshot => _dispatcher.BeginInvoke(() => {
+				if (snapshot.Revision != _audioService.ConfigurationVersion || snapshot.DeviceScoped != Settings.SeparateVolumesByDevice) { return; }
+				_live = snapshot.Sessions;
+				RebuildRows();
+			});
+			_audioService.ErrorOccurred += text => _dispatcher.BeginInvoke(() => StatusText = text);
+			Settings.DeviceModeChanged += ApplyDeviceMode;
+			Settings.PropertyChanged += (_, args) => {
+				if (args.PropertyName == nameof(Settings.FollowDefaultDevice)) { UpdateChoices(); }
+			};
+			ApplyDeviceMode();
 		}
 
 		public AudioDeviceInfo? SelectedDevice {
 			get => _selectedDevice;
 			set {
-				if (!SetField(ref _selectedDevice, value) || value == null || _suppressDeviceApply) {
-					return;
-				}
-
+				if (!SetField(ref _selectedDevice, value) || value == null || _suppressDeviceApply) { return; }
+				OnPropertyChanged(nameof(HasSelectedDevice));
 				_audioService.SelectDevice(value.Id);
+				string id = value.Id;
 				_writer.Schedule("setting:" + SettingsRepository.Keys.SelectedDeviceId,
-					(connection, transaction) => SettingsRepository.Set(connection, SettingsRepository.Keys.SelectedDeviceId, value.Id, transaction));
+					(connection, transaction) => SettingsRepository.Set(connection, SettingsRepository.Keys.SelectedDeviceId, id, transaction));
 			}
 		}
 
 		public int MasterVolume {
 			get => _masterVolume;
 			set {
-				int clamped = Math.Clamp(value, 0, 100);
-				if (_masterVolume == clamped) {
-					return;
-				}
-
-				_masterVolume = clamped;
-				OnPropertyChanged();
-				OnPropertyChanged(nameof(MasterVolumeText));
-
-				if (!_suppressMasterApply) {
-					_audioService.SetMasterVolume(clamped / 100f);
+				if (SetField(ref _masterVolume, Math.Clamp(value, 0, 100))) {
+					OnPropertyChanged(nameof(MasterVolumeText));
+					if (!_suppressMasterApply && SelectedDevice != null) {
+						_audioService.SetMasterVolume(SelectedDevice.Id, _masterVolume / 100f);
+					}
 				}
 			}
 		}
-
-		public string MasterVolumeText => _masterVolume + " %";
-
-		/// <summary>Volume that apps without a saved entry get when they first appear.</summary>
+		public string MasterVolumeText => MasterVolume + " %";
 		public int DefaultVolume {
 			get => _defaultVolume;
 			set {
-				int clamped = Math.Clamp(value, 0, 100);
-				if (_defaultVolume == clamped) {
-					return;
-				}
-
-				_defaultVolume = clamped;
-				OnPropertyChanged();
-				OnPropertyChanged(nameof(DefaultVolumeText));
-
-				_policy.DefaultVolumeScalar = clamped / 100f;
-				_writer.Schedule("setting:" + SettingsRepository.Keys.DefaultVolumeScalar,
-					(connection, transaction) => SettingsRepository.Set(connection, SettingsRepository.Keys.DefaultVolumeScalar,
-						(clamped / 100f).ToString(System.Globalization.CultureInfo.InvariantCulture), transaction));
-			}
-		}
-
-		public string DefaultVolumeText => _defaultVolume + " %";
-
-		public string SearchText {
-			get => _searchText;
-			set {
-				if (SetField(ref _searchText, value)) {
-					SessionsView.Refresh();
+				if (SetField(ref _defaultVolume, Math.Clamp(value, 0, 100))) {
+					OnPropertyChanged(nameof(DefaultVolumeText));
+					float scalar = _defaultVolume / 100f;
+					_policy.DefaultVolumeScalar = scalar;
+					_writer.Schedule("setting:" + SettingsRepository.Keys.DefaultVolumeScalar,
+						(connection, transaction) => SettingsRepository.Set(connection, SettingsRepository.Keys.DefaultVolumeScalar,
+							scalar.ToString(CultureInfo.InvariantCulture), transaction));
+					RebuildRows();
 				}
 			}
 		}
+		public string DefaultVolumeText => DefaultVolume + " %";
+		public string SearchText { get => _searchText; set { if (SetField(ref _searchText, value)) { SessionsView.Refresh(); } } }
+		public string StatusText { get => _statusText; set => SetField(ref _statusText, value); }
+		public string HotkeyStatusText { get => _hotkeyStatusText; set => SetField(ref _hotkeyStatusText, value); }
 
-		public string StatusText {
-			get => _statusText;
-			set => SetField(ref _statusText, value);
+		private void ApplyDeviceMode() {
+			_audioService.ConfigureDeviceMode(Settings.SeparateVolumesByDevice, Settings.ManagedDeviceIds);
+			_live = [];
+			UpdateChoices();
+			RebuildRows();
+			StatusText = Settings.SeparateVolumesByDevice
+				? "Device mode: only checked outputs and the followed Windows default are managed."
+				: "Legacy mode: app preferences are global; only the selected output is managed.";
 		}
 
-		public string HotkeyStatusText {
-			get => _hotkeyStatusText;
-			set => SetField(ref _hotkeyStatusText, value);
-		}
-
-		// ---- Called by SessionViewModel ----
-
-		public void ApplySessionVolume(SessionViewModel session) {
-			float scalar = session.Volume / 100f;
-
-			if (session.IsActive) {
-				_audioService.SetSessionVolume(session.Name, scalar);
-			}
-
-			if (session.Saved) {
-				_policy.SetSaved(session.Name, scalar);
-				ScheduleUpsert(session.Name, scalar);
-			}
-		}
-
-		public void ApplySavedChanged(SessionViewModel session) {
-			if (session.Saved) {
-				float scalar = session.Volume / 100f;
-				_policy.SetSaved(session.Name, scalar);
-				ScheduleUpsert(session.Name, scalar);
-			} else {
-				_policy.RemoveSaved(session.Name);
-				_writer.Schedule("session:" + session.Name,
-					(connection, transaction) => SessionVolumeRepository.Delete(connection, session.Name, transaction));
-
-				if (!session.IsActive) {
-					Sessions.Remove(session);
-				}
-			}
-		}
-
-		private void ScheduleUpsert(string name, float scalar) {
-			_lastSeen[name] = DateTime.Now;
-			_writer.Schedule("session:" + name,
-				(connection, transaction) => SessionVolumeRepository.Upsert(connection, name, scalar, transaction));
-		}
-
-		// ---- Updates coming from the audio service (already on the UI thread) ----
-
-		private void UpdateDevices(IReadOnlyList<AudioDeviceInfo> devices, string? currentDeviceId) {
+		private void UpdateDevices(IReadOnlyList<AudioDeviceInfo> devices, string? id) {
 			_suppressDeviceApply = true;
 			try {
 				Devices.Clear();
-				foreach (AudioDeviceInfo device in devices) {
+				foreach (var device in devices) {
 					Devices.Add(device);
+					_deviceNames[device.Id] = device.FriendlyName;
 				}
-
-				_selectedDevice = devices.FirstOrDefault(d => d.Id == currentDeviceId);
+				_selectedDevice = devices.FirstOrDefault(d => d.Id == id);
 				OnPropertyChanged(nameof(SelectedDevice));
-			} finally {
-				_suppressDeviceApply = false;
+				OnPropertyChanged(nameof(HasSelectedDevice));
+			} finally { _suppressDeviceApply = false; }
+			UpdateChoices();
+		}
+
+		private void UpdateChoices() {
+			DeviceChoices.Clear();
+			HashSet<string> ids = Devices.Select(d => d.Id).Concat(Settings.ManagedDeviceIds)
+				.Concat(_policy.GetAllDevices().Select(r => r.Key.DeviceId)).ToHashSet(StringComparer.Ordinal);
+			foreach (string id in ids.OrderBy(DeviceName, StringComparer.OrdinalIgnoreCase)) {
+				AudioDeviceInfo? available = Devices.FirstOrDefault(d => d.Id == id);
+				DeviceChoices.Add(new(Settings, id, DeviceName(id), available != null, available?.IsDefault == true));
 			}
 		}
 
-		private void UpdateMasterVolumeFromDevice(float scalar) {
-			_suppressMasterApply = true;
-			MasterVolume = (int)Math.Round(scalar * 100f);
-			_suppressMasterApply = false;
+		private string DeviceName(string id) => _deviceNames.TryGetValue(id, out string? name) ? name : "Unavailable output";
+		private bool IsCurrentMode(SessionViewModel row) => Settings.SeparateVolumesByDevice != row.Key.IsGlobal;
+
+		public void ApplySessionVolume(SessionViewModel row) {
+			if (!IsCurrentMode(row)) { return; }
+			// Publish the new rule before queuing its live write; callbacks see the new target.
+			if (row.Saved) { SaveRule(row); }
+			if (row.IsActive) { _audioService.SetSessionVolume(row.DeviceId, row.Name, row.Volume / 100f, !row.Key.IsGlobal); }
+			else { RebuildRows(); }
 		}
 
-		private void UpdateSessionVolumeFromDevice(string name, float scalar) {
-			Sessions.FirstOrDefault(s => s.Name == name)?.UpdateVolumeFromDevice(scalar);
+		public void ApplySavedChanged(SessionViewModel row) {
+			if (!IsCurrentMode(row)) { return; }
+			VolumeKey key = row.Key;
+			if (row.Saved) {
+				SaveRule(row);
+				_audioService.ReapplyRule(key);
+			} else if (key.IsGlobal) {
+				_policy.RemoveSaved(key.Name);
+				_writer.Schedule(key.WriteKey, (c, t) => SessionVolumeRepository.Delete(c, key.Name, t));
+				// Preserve legacy behavior: unsaving alone does not change a live volume.
+			} else {
+				_policy.RemoveDevice(key);
+				_writer.Schedule(key.WriteKey, (c, t) => DeviceVolumeRepository.Delete(c, key, t));
+				_audioService.ReapplyRule(key); // returns only this output to global/default inheritance
+			}
+			RebuildRows();
 		}
 
-		private void MergeSessions(IReadOnlyList<AudioSessionInfo> snapshot) {
-			// Group active session instances by display name (first volume wins).
-			Dictionary<string, float> activeByName = [];
-			foreach (AudioSessionInfo info in snapshot) {
-				activeByName.TryAdd(info.Name, info.ScalarVolume);
+		public void ApplyMaintainChanged(SessionViewModel row) {
+			if (!IsCurrentMode(row) || !row.Saved || row.Key.IsGlobal) { return; }
+			// A live Discord reset may be displayed on an unlocked row. Maintaining
+			// a saved rule must keep its saved target, not save that reset volume.
+			DeviceVolumeRule? updated = _policy.SetMaintenance(row.Key, row.MaintainVolume);
+			if (updated == null) { return; }
+			_writer.Schedule(row.Key.WriteKey, (c, t) => DeviceVolumeRepository.Upsert(c, updated, t));
+			_audioService.ReapplyRule(row.Key);
+			RebuildRows();
+		}
+
+		public void ResumeMaintenance(SessionViewModel row) {
+			if (!IsCurrentMode(row) || !row.Saved || !row.MaintainVolume || row.Key.IsGlobal) { return; }
+			// Retry the persisted target, not a transient Windows mixer value.
+			_audioService.ReapplyRule(row.Key);
+		}
+
+		private void SaveRule(SessionViewModel row) {
+			VolumeKey key = row.Key;
+			float scalar = row.Volume / 100f;
+			bool active = row.IsActive;
+			if (key.IsGlobal) {
+				_policy.SetSaved(key.Name, scalar);
+				_writer.Schedule(key.WriteKey, (c, t) => SessionVolumeRepository.Upsert(c, key.Name, scalar, t));
+			} else {
+				DeviceVolumeRule rule = new(key, row.DeviceName, scalar, row.MaintainVolume);
+				_policy.SetDevice(rule);
+				_writer.Schedule(key.WriteKey, (c, t) => {
+					DeviceVolumeRepository.Upsert(c, rule, t);
+					if (active) { DeviceVolumeRepository.TouchLastSeen(c, key, t); }
+				});
 			}
+			if (active) { _lastSeen[key] = DateTime.Now; }
+		}
 
-			Dictionary<string, SessionViewModel> existing = Sessions.ToDictionary(s => s.Name);
-			List<SessionViewModel> result = [];
-			bool groupChanged = false;
-
-			foreach ((string name, float scalar) in activeByName) {
-				if (existing.TryGetValue(name, out SessionViewModel? session)) {
-					if (!session.IsActive) {
-						session.IsActive = true;
-						groupChanged = true;
-						MarkSeen(session);
-					}
-					session.UpdateVolumeFromDevice(scalar);
-					result.Add(session);
-				} else {
-					SessionViewModel created = new(this, name, (int)Math.Round(scalar * 100f),
-						saved: _policy.GetSaved(name) != null, isActive: true, GetLastSeen(name));
-					MarkSeen(created);
-					result.Add(created);
-				}
-			}
-
-			// Saved apps that are not currently playing stay visible (grayed out).
-			foreach ((string name, float scalar) in _policy.GetAllSaved()) {
-				if (activeByName.ContainsKey(name)) {
-					continue;
-				}
-
-				if (existing.TryGetValue(name, out SessionViewModel? session)) {
-					if (session.IsActive) {
-						session.IsActive = false;
-						groupChanged = true;
-					}
-					result.Add(session);
-				} else {
-					result.Add(new SessionViewModel(this, name, (int)Math.Round(scalar * 100f),
-						saved: true, isActive: false, GetLastSeen(name)));
-				}
-			}
-
-			// System Sounds first, then running apps, then saved ones; alphabetical within each group.
-			result.Sort((a, b) => {
-				if (a.IsSystemSounds != b.IsSystemSounds) {
-					return a.IsSystemSounds ? -1 : 1;
-				}
-				if (a.IsActive != b.IsActive) {
-					return a.IsActive ? -1 : 1;
-				}
-				return string.Compare(a.DisplayName, b.DisplayName, StringComparison.OrdinalIgnoreCase);
+		private void MarkSeen(VolumeKey key) {
+			_lastSeen[key] = DateTime.Now;
+			_writer.Schedule("seen:" + key.WriteKey, (c, t) => {
+				if (key.IsGlobal) { SessionVolumeRepository.TouchLastSeen(c, key.Name, t); }
+				else { DeviceVolumeRepository.TouchLastSeen(c, key, t); }
 			});
+		}
 
+		private void RebuildRows() {
+			bool scoped = Settings.SeparateVolumesByDevice;
+			Dictionary<VolumeKey, List<AudioSessionInfo>> active = _live.GroupBy(info => scoped
+				? new VolumeKey(info.DeviceId, info.Name) : VolumeKey.Global(info.Name)).ToDictionary(group => group.Key, group => group.ToList());
+			HashSet<VolumeKey> keys = active.Keys.ToHashSet();
+			if (scoped) { keys.UnionWith(_policy.GetAllDevices().Select(r => r.Key)); }
+			else { keys.UnionWith(_policy.GetAllSaved().Keys.Select(VolumeKey.Global)); }
+			Dictionary<VolumeKey, SessionViewModel> existing = Sessions.ToDictionary(s => s.Key);
+			List<SessionViewModel> result = [];
+			foreach (VolumeKey key in keys) {
+				if (!existing.TryGetValue(key, out var row)) { row = new(this, key); }
+				IReadOnlyList<AudioSessionInfo> live = active.TryGetValue(key, out var instances) ? instances : Array.Empty<AudioSessionInfo>();
+				bool saved = key.IsGlobal ? _policy.GetSaved(key.Name) != null : _policy.GetDevice(key) != null;
+				if (saved && !row.IsActive && live.Count > 0) { MarkSeen(key); }
+				string id = key.IsGlobal ? live.FirstOrDefault()?.DeviceId ?? SelectedDevice?.Id ?? "" : key.DeviceId;
+				string name = live.FirstOrDefault()?.DeviceName ?? _policy.GetDevice(key)?.DeviceName ?? DeviceName(id);
+				row.Update(id, name, live, _policy.Resolve(key), saved, _lastSeen.GetValueOrDefault(key));
+				result.Add(row);
+			}
+			result.Sort((a, b) => {
+				int device = string.Compare(a.DeviceName, b.DeviceName, StringComparison.OrdinalIgnoreCase);
+				if (device != 0) { return device; }
+				if (a.IsSystemSounds != b.IsSystemSounds) { return a.IsSystemSounds ? -1 : 1; }
+				if (a.IsActive != b.IsActive) { return a.IsActive ? -1 : 1; }
+				return string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+			});
 			if (!result.SequenceEqual(Sessions)) {
 				Sessions.Clear();
-				foreach (SessionViewModel session in result) {
-					Sessions.Add(session);
-				}
-			} else if (groupChanged) {
-				// Same order, but a row switched groups in place: re-evaluate the grouping.
-				SessionsView.Refresh();
+				foreach (var row in result) { Sessions.Add(row); }
 			}
-		}
-
-		private DateTime? GetLastSeen(string name) => _lastSeen.TryGetValue(name, out DateTime? seen) ? seen : null;
-
-		/// <summary>A saved app just became active: remember when it was last seen.</summary>
-		private void MarkSeen(SessionViewModel session) {
-			if (!session.Saved) {
-				return;
-			}
-
-			session.LastSeenAt = DateTime.Now;
-			_lastSeen[session.Name] = DateTime.Now;
-			_writer.Schedule("seen:" + session.Name,
-				(connection, transaction) => SessionVolumeRepository.TouchLastSeen(connection, session.Name, transaction));
+			SessionsView.Refresh();
 		}
 	}
 }

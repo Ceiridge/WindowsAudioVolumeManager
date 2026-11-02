@@ -1,0 +1,32 @@
+name: Device volumes - Windows build
+on:
+  push:
+    branches: ['feat/device-scoped-volumes*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, verified 2026-10-18
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '10.0.402'
+      - name: Build, test and publish without launching the application
+        shell: pwsh
+        run: ./scripts/Publish-Windows.ps1
+      - name: Retain binary and non-private test result
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: device-volumes-win-x64
+          retention-days: 30
+          path: |
+            artifacts/WindowsAudioVolumeManager-*-win-x64.zip
+            artifacts/build-result.json
+            artifacts/unit-results.json
